@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Robot Station</title>
+<style>
+  :root { --bg:#11151c; --card:#1b2230; --btn:#2b3548; --blue:#3d8bfd; --text:#e8edf5;
+          --muted:#8b97ab; --ok:#3fb950; --warn:#e5a50a; --bad:#e5484d; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body { margin:0; background:var(--bg); color:var(--text);
+         font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+         padding: max(16px, env(safe-area-inset-top)) 16px max(16px, env(safe-area-inset-bottom)); }
+  .wrap { max-width: 520px; margin: 0 auto; display: flex; flex-direction: column; gap: 14px; }
+  .card { background: var(--card); border-radius: 16px; padding: 16px; }
+  .row { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+  h1 { font-size:18px; margin:0; }
+  h2 { font-size:13px; margin:0 0 10px; color:var(--muted); font-weight:600; letter-spacing:.4px; text-transform:uppercase; }
+  .dot { width:10px; height:10px; border-radius:50%; background:var(--bad); display:inline-block; margin-right:6px; }
+  .dot.on { background:var(--ok); }
+  .grid { display:grid; grid-template-columns: 1fr 1fr; gap:12px; }
+  .big { font-size:34px; font-weight:700; line-height:1.1; }
+  .sub { font-size:12px; color:var(--muted); margin-top:4px; }
+  .badge { display:inline-block; padding:3px 10px; border-radius:999px; font-size:12px; font-weight:600; background:var(--btn); color:var(--muted); }
+  .badge.home { background:var(--ok); color:#06210e; }
+  .badge.cocok { background:var(--ok); color:#06210e; }
+  .badge.salah, .badge.tidak_terbaca { background:var(--bad); color:#fff; }
+  .badge.lewat { background:var(--warn); color:#2b1d00; }
+  .banner { display:none; background:var(--bad); color:#fff; border-radius:12px; padding:10px 12px; text-align:center; font-weight:600; }
+  .banner.show { display:block; animation: blink .8s infinite; }
+  @keyframes blink { 50% { opacity:.55; } }
+  .state { font-size:18px; font-weight:600; }
+  .state.err { color: var(--bad); }
+  .btns { display:grid; grid-template-columns: repeat(3, 1fr); gap:10px; }
+  button { border:none; border-radius:14px; background:var(--btn); color:var(--text);
+           font-size:16px; font-weight:600; padding:16px 8px; cursor:pointer; touch-action: manipulation; }
+  button:active { background:var(--blue); }
+  button:disabled { opacity:.4; }
+  .home-btn { grid-column: span 3; background:#1f4d36; }
+  .stop-btn { grid-column: span 3; background:#6b2125; }
+  .uid { font-family: ui-monospace, Menlo, Consolas, monospace; font-size:20px; letter-spacing:1px; word-break:break-all; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="row">
+    <h1>Robot Station</h1>
+    <div><span class="dot" id="dot"></span><span id="koneksi">Menghubungkan…</span></div>
+  </div>
+
+  <div class="banner" id="bannerRintangan">⚠ Ada rintangan di depan!</div>
+
+  <div class="card">
+    <h2>Posisi</h2>
+    <div class="grid">
+      <div>
+        <div class="big" id="stationNow">—</div>
+        <div class="sub">Sedang di</div>
+        <div style="margin-top:6px"><span class="badge" id="homeBadge">Bukan HOME</span></div>
+      </div>
+      <div>
+        <div class="big" id="targetNow">—</div>
+        <div class="sub">Tujuan</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Status</h2>
+    <div class="state" id="stateText">—</div>
+    <div class="sub">Jarak depan: <b id="jarak">--</b></div>
+  </div>
+
+  <div class="card">
+    <h2>RFID</h2>
+    <div class="uid" id="uid">—</div>
+    <div style="margin-top:8px"><span class="badge" id="rfidBadge">—</span></div>
+  </div>
+
+  <div class="card">
+    <h2>Kontrol</h2>
+    <div class="btns" id="btns">
+      <button class="home-btn" id="btnHome" disabled>⌂ Pulang ke HOME</button>
+      <button class="stop-btn" id="btnStop" disabled>■ BATAL / STOP</button>
+    </div>
+  </div>
+
+</div>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import { getDatabase, ref, update, onValue } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
+
+// ====== ISI firebaseConfig PROJECT KAMU ======
+const firebaseConfig = {
+  apiKey: "AIzaSyDp-YRfFcPhXTVNLtP_BM4N4O08PY8TAdA",
+  authDomain: "robot-controller-01.firebaseapp.com",
+  databaseURL: "https://ISI_PROJECT-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "robot-controller-01.firebaseapp.com",
+  appId: "1:907976986608:web:7123de1f9f4609caf85735"
+};
+const JUMLAH_STATION = 3;   // samakan dengan JUMLAH_STATION di kode ESP32
+
+const app  = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db   = getDatabase(app);
+const $ = id => document.getElementById(id);
+
+// ---------- Tombol station ----------
+const btns = $("btns");
+const stationButtons = [];
+for (let i = 1; i <= JUMLAH_STATION; i++) {
+  const b = document.createElement("button");
+  b.textContent = "Station " + i;
+  b.disabled = true;
+  b.addEventListener("click", () => kirimMisi(i));
+  btns.insertBefore(b, $("btnHome"));
+  stationButtons.push(b);
+}
+$("btnHome").addEventListener("click", () => kirimMisi(0));
+$("btnStop").addEventListener("click", batal);
+
+// ---------- Kirim perintah ----------
+let lastId = 0;
+function idBaru() {                      // harus berubah setiap perintah
+  lastId = Math.max(lastId + 1, Math.floor(Date.now() / 1000));
+  return lastId;
+}
+function kirimMisi(target) {
+  update(ref(db, "robot/control"), { target: target, missionId: idBaru() }).catch(console.error);
+}
+function batal() {
+  update(ref(db, "robot/control"), { stopId: idBaru() }).catch(console.error);
+}
+
+// ---------- Teks status ----------
+const LABEL = {
+  siap: "Siap", home: "Di HOME", menuju_station: "Menuju station", pulang: "Pulang ke HOME",
+  berputar: "Berputar balik", menunggu_rfid: "Menunggu bacaan RFID", menurunkan: "Menurunkan barang",
+  selesai: "Selesai, barang diturunkan", terhalang: "Terhalang rintangan",
+  station_salah: "Station salah (RFID tidak cocok)", rfid_tidak_terbaca: "RFID tidak terbaca",
+  garis_hilang: "Garis hilang", penanda_tidak_dikenal: "Penanda tidak dikenal",
+  timeout_misi: "Misi terlalu lama (timeout)", target_tidak_valid: "Tujuan tidak valid",
+  dibatalkan: "Dibatalkan"
+};
+const ERROR_STATES = ["station_salah","rfid_tidak_terbaca","garis_hilang","penanda_tidak_dikenal","timeout_misi","target_tidak_valid"];
+const RFID_LABEL = { cocok: "Cocok ✓", salah: "Tidak cocok ✗", tidak_terbaca: "Tidak terbaca", lewat: "Terbaca sambil lewat", "-": "—" };
+
+let stateSebelumnya = "";
+onValue(ref(db, "robot/status"), snap => {
+  const s = snap.val() || {};
+
+  const stn = s.station;
+  $("stationNow").textContent = stn === undefined ? "—" : (stn === 0 ? "HOME" : "Station " + stn);
+  const tg = s.target;
+  $("targetNow").textContent = (tg === undefined || tg === -1) ? "—" : (tg === 0 ? "HOME" : "Station " + tg);
+
+  const hb = $("homeBadge");
+  hb.textContent = s.home === true ? "HOME" : "Bukan HOME";
+  hb.className = "badge" + (s.home === true ? " home" : "");
+
+  const st = s.state || "—";
+  const stEl = $("stateText");
+  stEl.textContent = LABEL[st] || st;
+  stEl.classList.toggle("err", ERROR_STATES.includes(st));
+  if (ERROR_STATES.includes(st) && st !== stateSebelumnya && navigator.vibrate) navigator.vibrate([150, 80, 150]);
+  stateSebelumnya = st;
+
+  $("uid").textContent = (s.rfid && s.rfid !== "-") ? s.rfid : "—";
+  const rs = s.rfidStatus || "-";
+  const rb = $("rfidBadge");
+  rb.textContent = RFID_LABEL[rs] || rs;
+  rb.className = "badge " + rs;
+
+  $("jarak").textContent = (s.distance === undefined) ? "--" : (s.distance >= 400 ? ">400 cm" : s.distance + " cm");
+  $("bannerRintangan").classList.toggle("show", s.obstacle === true);
+});
+
+onValue(ref(db, ".info/connected"), s => {
+  const on = s.val() === true;
+  $("dot").classList.toggle("on", on);
+  $("koneksi").textContent = on ? "Terhubung" : "Terputus";
+});
+
+// ---------- Login anonim lalu aktifkan tombol ----------
+signInAnonymously(auth)
+  .then(() => {
+    stationButtons.forEach(b => b.disabled = false);
+    $("btnHome").disabled = false;
+    $("btnStop").disabled = false;
+  })
+  .catch(err => {
+    console.error(err);
+    $("koneksi").textContent = "Login gagal";
+    $("koneksi").title = String(err && err.message || err);
+  });
+</script>
+</body>
+</html>
